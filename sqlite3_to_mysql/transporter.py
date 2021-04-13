@@ -283,7 +283,7 @@ class SQLite3toMySQL:
             return match.group(0).upper() + length
         if data_type in {"INT64", "NUMERIC"}:
             return "BIGINT" + self._column_type_length(column_type, 19)
-        return full_column_type
+        return self._mysql_string_type
 
     @classmethod
     def _column_type_length(cls, column_type, default=None):
