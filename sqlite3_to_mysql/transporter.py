@@ -338,7 +338,7 @@ class SQLite3toMySQL:
             )
         if transfer_rowid:
             sql += ", CONSTRAINT `{}_rowid` UNIQUE (`rowid`)".format(table_name)
-        sql += " ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_as_cs"
+        sql += " ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"
 
         try:
             self._mysql_cur.execute(sql)
