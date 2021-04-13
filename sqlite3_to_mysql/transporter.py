@@ -253,6 +253,7 @@ class SQLite3toMySQL:
         match = self._valid_column_type(column_type)
         if not match:
             raise ValueError("Invalid column_type!")
+        
 
         data_type = match.group(0).upper()
         if data_type in {"TEXT", "CLOB", "STRING"}:
@@ -306,6 +307,7 @@ class SQLite3toMySQL:
 
         for row in self._sqlite_cur.fetchall():
             column = dict(row)
+
             sql += " `{name}` {type} {notnull} {auto_increment}, ".format(
                 name=column["name"],
                 type=self._translate_type_from_sqlite_to_mysql(column["type"]),
@@ -336,7 +338,7 @@ class SQLite3toMySQL:
             )
         if transfer_rowid:
             sql += ", CONSTRAINT `{}_rowid` UNIQUE (`rowid`)".format(table_name)
-        sql += " ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+        sql += " ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_as_cs"
 
         try:
             self._mysql_cur.execute(sql)
@@ -344,6 +346,22 @@ class SQLite3toMySQL:
         except mysql.connector.Error as err:
             self._logger.error("MySQL failed creating table %s: %s", table_name, err)
             raise
+
+    def _index_string_for_Info(self, index_info, table_columns):
+        if table_columns[index_info["name"]].upper() == "TEXT" or table_columns[index_info["name"]].upper() == "BLOB":
+            return "`{column}`{length}".format(
+                column=index_info["name"], length="({})".format(255)
+            )
+        else:
+            suffix = self.COLUMN_LENGTH_PATTERN.search(
+                table_columns[index_info["name"]]
+            )
+            index_length = ""
+            if suffix:
+                index_length = suffix.group(0)
+            return "`{column}`{length}".format(
+                column=index_info["name"], length=index_length
+            )
 
     def _add_indices(self, table_name):
         self._sqlite_cur.execute('PRAGMA table_info("{}")'.format(table_name))
@@ -364,44 +382,55 @@ class SQLite3toMySQL:
 
             index_type = "UNIQUE" if int(index["unique"]) == 1 else "INDEX"
 
-            if any(
+            if all(
                 table_columns[index_info["name"]].upper() == "TEXT"
                 for index_info in index_infos
-            ):
-
-                if self._use_fulltext and self._mysql_fulltext_support:
-                    # Use fulltext if requested and available
-                    index_type = "FULLTEXT"
-                    index_columns = ",".join(
-                        "`{}`".format(index_info["name"]) for index_info in index_infos
-                    )
-                else:
-                    # Limit the max TEXT field index length to 255
-                    index_columns = ", ".join(
-                        "`{column}`{length}".format(
-                            column=index_info["name"], length="({})".format(255)
-                        )
-                        for index_info in index_infos
-                    )
+            ) and self._use_fulltext and self._mysql_fulltext_support:
+                index_type = "FULLTEXT"
+                index_columns = ",".join(
+                    "`{}`".format(index_info["name"]) for index_info in index_infos
+                )
             else:
-                column_list = []
-                for index_info in index_infos:
-                    index_length = ""
-                    # Limit the max BLOB field index length to 255
-                    if table_columns[index_info["name"]].upper() == "BLOB":
-                        index_length = "({})".format(255)
-                    else:
-                        suffix = self.COLUMN_LENGTH_PATTERN.search(
-                            table_columns[index_info["name"]]
-                        )
-                        if suffix:
-                            index_length = suffix.group(0)
-                    column_list.append(
-                        "`{column}`{length}".format(
-                            column=index_info["name"], length=index_length
-                        )
-                    )
-                index_columns = ", ".join(column_list)
+                index_column_strings = map(lambda x: self._index_string_for_Info(x, table_columns), index_infos)
+                index_columns= ", ".join(index_column_strings)
+            # if any(
+            #     table_columns[index_info["name"]].upper() == "TEXT"
+            #     for index_info in index_infos
+            # ):
+
+            #     if self._use_fulltext and self._mysql_fulltext_support:
+            #         # Use fulltext if requested and available
+            #         index_type = "FULLTEXT"
+            #         index_columns = ",".join(
+            #             "`{}`".format(index_info["name"]) for index_info in index_infos
+            #         )
+            #     else:
+            #         # Limit the max TEXT field index length to 255
+            #         index_columns = ", ".join(
+            #             "`{column}`{length}".format(
+            #                 column=index_info["name"], length="({})".format(255)
+            #             )
+            #             for index_info in index_infos
+            #         )
+            # else:
+            #     column_list = []
+            #     for index_info in index_infos:
+            #         index_length = ""
+            #         # Limit the max BLOB field index length to 255
+            #         if table_columns[index_info["name"]].upper() == "BLOB":
+            #             index_length = "({})".format(255)
+            #         else:
+            #             suffix = self.COLUMN_LENGTH_PATTERN.search(
+            #                 table_columns[index_info["name"]]
+            #             )
+            #             if suffix:
+            #                 index_length = suffix.group(0)
+            #         column_list.append(
+            #             "`{column}`{length}".format(
+            #                 column=index_info["name"], length=index_length
+            #             )
+            #         )
+            #     index_columns = ", ".join(column_list)
 
             self._add_index(
                 table_name=table_name,
@@ -441,6 +470,7 @@ class SQLite3toMySQL:
                 ", ".join(index_info["name"] for index_info in index_infos),
                 table_name,
             )
+
             self._mysql_cur.execute(sql)
             self._mysql.commit()
         except mysql.connector.Error as err:
